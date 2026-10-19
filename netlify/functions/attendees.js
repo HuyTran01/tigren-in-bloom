@@ -1,23 +1,34 @@
-let attendees = [];
+import { createClient } from '@supabase/supabase-js';
 
-const response = (statusCode, body) => ({
+const json = (statusCode, body) => ({
   statusCode,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
 
-exports.handler = async (event) => {
-  if (event.httpMethod === 'GET') return response(200, { attendees });
-  if (event.httpMethod !== 'POST') return response(405, { error: 'Method Not Allowed' });
+const getClient = () => {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return url && key ? createClient(url, key) : null;
+};
 
-  let body;
-  try { body = JSON.parse(event.body || '{}'); } catch { return response(400, { error: 'Invalid JSON' }); }
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (!name || name.length > 120) return response(400, { error: 'Name must be between 1 and 120 characters' });
-  if (attendees.some((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-    return response(409, { error: 'This name is already registered' });
+export const handler = async (event) => {
+  const client = getClient();
+  if (event.httpMethod === 'GET') {
+    if (!client) return json(200, { attendees: [] });
+    const { data, error } = await client.from('attendees').select('id, name, created_at').order('created_at', { ascending: false });
+    if (error) return json(500, { error: 'Unable to load attendees' });
+    return json(200, { attendees: data ?? [] });
   }
-  const attendee = { name, created_at: new Date().toISOString() };
-  attendees = [...attendees, attendee];
-  return response(201, { attendee });
+  if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
+  let body;
+  try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name || name.length > 120) return json(400, { error: 'Name must be between 1 and 120 characters' });
+  if (!client) return json(503, { error: 'Database is not configured' });
+  const normalized_name = name.normalize('NFKC').toLocaleLowerCase('vi-VN');
+  const { data, error } = await client.from('attendees').insert({ name, normalized_name }).select('id, name, created_at').single();
+  if (error?.code === '23505') return json(409, { error: 'This name is already registered' });
+  if (error) return json(500, { error: 'Unable to save attendee' });
+  return json(201, { attendee: data });
 };
