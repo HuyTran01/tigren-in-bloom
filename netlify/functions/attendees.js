@@ -22,7 +22,7 @@ exports.handler = async (event) => {
     const normalized_name = name.normalize('NFKC').toLocaleLowerCase('vi-VN');
     const { data, error } = await client.from('attendees').insert({ name, normalized_name }).select('id,name,created_at').single();
     if (error?.code === '23505') return json(409, { error: 'Duplicate name' });
-    if (error) return json(500, { error: 'Unable to save attendee' });
+    if (error) { console.error('Supabase insert error', { code: error.code, message: error.message, details: error.details, hint: error.hint }); return json(500, { error: 'Unable to save attendee' }); }
     return json(201, { attendee: data });
   }
   if (!adminOk(event)) return json(401, { error: 'Unauthorized' });
